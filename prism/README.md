@@ -27,6 +27,7 @@ Briefly, running DeepMass:Prism consists of three steps:
     `service-114490567449@cloud-ml.google.com.iam.gserviceaccount.com`
 *   Clone this repository to your local machine, using the following command: \
     `git clone https://github.com/verilylifesciences/deepmass.git`
+*   There are no system-specific requirements.
 
 ## Install dependencies
 
@@ -95,6 +96,45 @@ gcloud ml-engine predict \
     --project deepmass-204419 \
     --format json \
     --json-instances "${DATA_DIR}/input.json" > "${DATA_DIR}/prediction.results"
+```
+
+Runtime will depend on the number of input examples, but it should generally be
+completed within minutes. The output at this step should look like this:
+
+```
+{
+  "predictions": [
+    {
+      "key": 0,
+      "outputs": [
+        [
+          0.0,
+          0.0
+        ],
+        ...
+        [
+          3219.9737692221674,
+          0.0
+        ]
+      ]
+    },
+    {
+      "key": 1,
+      "outputs": [
+        [
+          0.0,
+          0.0
+        ],
+        ...
+        [
+          1663.7626936434697,
+          0.0
+        ]
+      ]
+    }
+  ]
+}
+
 ```
 
 ## Post-processing step
