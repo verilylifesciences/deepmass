@@ -19,12 +19,6 @@ Briefly, running DeepMass:Prism consists of three steps:
 
 ## Prerequisites
 
-*   Make sure you have your Google Cloud Project set up
-    ([link](https://cloud.google.com/)).
-*   Add the following DeepMass service account to your Cloud project and grant
-    it “Storage Admin” access role
-    ([help](https://cloud.google.com/iam/docs/how-to)):
-    `service-114490567449@cloud-ml.google.com.iam.gserviceaccount.com`
 *   Clone this repository to your local machine, using the following command: \
     `git clone https://github.com/verilylifesciences/deepmass.git`
 *   There are no system-specific requirements.
@@ -84,7 +78,16 @@ The preprocessing step will write two files into the `"${DATA_DIR}"` folder:
 input.json and metadata.csv. The first one should be uploaded to a Google Cloud
 Storage bucket, and the latter one will be used in the post-processing step.
 
-## Submit batch prediction job to CMLE
+## Submit prediction job to CMLE
+
+CMLE supports two modes of job submission: online and batch. You can read more
+about it
+[here](https://cloud.google.com/ml-engine/docs/tensorflow/online-vs-batch-prediction),
+but briefly: the online mode is easier to set up, but can only process a limited
+number of peptide inputs (up to ~300). The batch mode setup, on the other hand,
+is more involved, but can easily process unlimited input sizes.
+
+### Submit predictions in the online mode
 
 Run the following command to submit a CMLE online job (input file size is
 limited to 1.5 Mb, which corresponds to ~300 peptides - support for batch
@@ -136,6 +139,62 @@ completed within minutes. The output at this step should look like this:
 }
 
 ```
+
+### Submit predictions in the batch mode
+
+To setup your system for batch predictions, do the folowing:
+
+*   Make sure you have your Google Cloud Project set up
+    ([link](https://cloud.google.com/)).
+*   Add the following DeepMass service account to your Cloud project and grant
+    it “Storage Admin” access role
+    ([help](https://cloud.google.com/iam/docs/how-to)):
+
+    `service-114490567449@cloud-ml.google.com.iam.gserviceaccount.com`
+
+*   You will then need to copy the preprocessed inputs from step 1 into a Google
+    Cloud Storage (GCS) bucket under your Google Cloud Project
+    ([link](https://cloud.google.com/storage/docs/creating-buckets)).
+
+Then go to console/terminal and configure the following gcloud settings:
+
+```
+PROJECT_NAME="project_name"  # Modify.
+gcloud auth login
+gcloud auth application-default login
+gcloud config set account "${ACCOUNT_NAME}"  # ACCOUNT_NAME is email address you
+                                             # used to set up the Cloud Projects
+gcloud config set project "${PROJECT_NAME}"
+
+```
+
+Now you're ready to submit a CMLE batch job as follows:
+
+```
+CLOUD_DIR="gs://path-to-gcs-bucket"  # Modify.
+INPUTS="${CLOUD_DIR}/input.json"  # Modify.
+JOB_NAME="prediction_job_name"  # Modify.
+REGION="us-central1"  # Modify.
+
+gcloud ml-engine jobs submit prediction "${JOB_NAME}" \
+    --model deepmass_prism \
+    --input-paths "${INPUTS}" \
+    --output-path "${CLOUD_DIR}" \
+    --region "${REGION}" \
+    --data-format text \
+    --project deepmass-204419
+```
+
+This run will write several files (depending on the number of peptides in the
+input table) into `"${CLOUD_DIR}"`, with the following filename pattern:
+prediction.results* and prediction.errors_stats*. If the post-processing step
+will be carried out locally, then you should transfer the outputs to a local
+folder (for example, `"${DATA_DIR}"`).
+
+**Privacy note:** Running the predictions in batch mode will log the email
+address registered under user's Google Cloud Project, as well as the input and
+output paths. If this is a concern, please run the prediction in the online
+mode.
 
 ## Post-processing step
 
