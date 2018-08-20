@@ -15,6 +15,7 @@
 #
 r"""This module contains utility functions for DeepMass Prism."""
 
+import itertools
 import re
 
 import numpy as np
@@ -36,32 +37,51 @@ _PERCENTILES = pd.DataFrame([
      7]], index=['Length', 'Charge']).T
 _ALPHABETS = {'Fragmentation': ['HCD', 'CID'], 'MassAnalyzer': ['ITMS', 'FTMS']}
 
+_RESIDUE = re.compile(r'[A-Z](\((\w+)\))?')
 
-def _range_normalize(vector, lower=None, upper=None):
-  """Normalizes values to a range (eg [0, 1]).
+_GROUP = 'group'
+_GROUP_H = _GROUP + 'H'
+_GROUP_HP = _GROUP + 'H+'
+_GROUP_OH = _GROUP + 'OH'
+_GROUP_NH3 = _GROUP + 'NH3'
+_GROUP_H2O = _GROUP + 'H2O'
 
-  Used to range normalize a subset of a larger set of data (where the total
-  range exceeds the [min, max] of the values in vector).
+MOL_WEIGHTS = {
+    'A': 71.03711,
+    'C': 103.00919 + 57.02146,  # Add fixed CME modification to the Cys mass.
+    'E': 129.04259,
+    'D': 115.02694,
+    'G': 57.02146,
+    'F': 147.06841,
+    'I': 113.08406,
+    'H': 137.05891,
+    'K': 128.09496,
+    'M': 131.04049,
+    'L': 113.08406,
+    'N': 114.04293,
+    'Q': 128.05858,
+    'P': 97.05276,
+    'S': 87.03203,
+    'R': 156.10111,
+    'T': 101.04768,
+    'W': 186.07931,
+    'V': 99.06841,
+    'Y': 163.06333,
+    'M(ox)': 147.035405,
+    'groupCH3': 14.01565,
+    'groupOH': 17.00274,
+    'groupH': 1.007825,
+    'groupH+': 1.007276,
+    'groupH2O': 18.01057,
+    'groupCH3CO': 42.01057,
+    'groupO': 15.994915,
+    'groupNH3': 17.02655}
 
-  Note that this can return values outside of [0, 1] if lower or upper are
-  within the range of vector. This throws no error as it can be useful in some
-  cases.
-
-  Args:
-    vector: Numpy array-like with values to normalize.
-    lower: The minimum value in the complete dataset. None to use vector.min()
-    upper: The maximum value in the complete dataset. None to use vector.max()
-
-  Returns:
-    An object of type vector with values correspondingly normalized.
-  """
-
-  if lower is None:
-    lower = vector.min()
-  if upper is None:
-    upper = vector.max()
-
-  return (vector - lower) / (upper - lower)
+_POSITION_COL = 'FragmentNumber'
+_RESIDUE_COL = 'residue'
+_ION_COL = 'FragmentType'
+_ABUNDANCE_COL = 'RelativeIntensity'
+_MZ_THEORY = 'FragmentMz'
 
 
 def clean_peptides(peptide_list):
@@ -175,3 +195,131 @@ def process_metadata(metadata):
           raise ValueError('Bad precursor feature process {}'.format(process))
 
   return metadata, precursor_features
+
+
+def calculate_yb_series(sequence, molecular_weights, neutral_losses=False):
+  """Calculates theoretical MS2 spectrum of y- and b-ion fragments.
+
+  MS2 spectrum is a result of the peptide fragmentation. By far the most common
+  fragmentations occur at YB sites in the peptide backbone chain. This function
+  calculates a theoretical YB fragmentation patterns for +1 and +2 charged
+  fragment ions, with an optional ions with neutral loss of water and ammonium
+  molecules. The accuracy of this function was tested against this server:
+  http://db.systemsbiology.net:8080/proteomicsToolkit
+
+  Args:
+    sequence: A string denoting peptide sequence (use 1-letter AA code, defined
+              in molecular_weights input).
+    molecular_weights: A Pandas series with weights of residues and neutral
+                       groups.
+    neutral_losses: True if NH3/H2O losses should be included, False otherwise.
+
+  Returns:
+    An array with theoretical y/b mz values.
+
+  Raises:
+    ValueError: In case molecular_weights does not contain one or more of
+                required neutral groups (ie, 'groupH', 'groupOH', 'groupNH3',
+                'groupH2O').
+  """
+
+  # Get peptide alphabet first.
+  peptide = [aa.group() for aa in re.finditer(_RESIDUE, sequence)]
+
+  # Check molecular_weights dictionary.
+  required_groups = set([_GROUP_H, _GROUP_OH, _GROUP_NH3, _GROUP_H2O])
+  if required_groups.difference(molecular_weights.keys()):
+    raise ValueError('molecular_weights does not contain all required groups')
+
+  peaks = pd.DataFrame()
+  peaks[_RESIDUE_COL] = peptide
+  peaks[_POSITION_COL] = np.arange(len(peptide)) + 1
+  # Get theoretical spectrum for single-charged b- and y-ions.
+  peaks['b'] = _calculate_b_series(peptide, molecular_weights)
+  peaks['y'] = _calculate_y_series(peptide, molecular_weights)
+
+  # Get theoretical spectra for NH3- and H2O-loss ions.
+  if neutral_losses:
+    for ion, grp in itertools.product(['b', 'y'], [_GROUP_NH3, _GROUP_H2O]):
+      peaks['{}-{}'.format(ion, grp.replace(_GROUP, ''))] = (
+          peaks[ion] - molecular_weights[grp])
+
+  # Reverse order of y ions, as they are generated backwards from C-terminus.
+  for name, col in peaks.filter(like='y', axis=1).iteritems():
+    peaks[name] = col[::-1].reset_index()[name]
+
+  peaks = pd.melt(peaks,
+                  id_vars=[_POSITION_COL, _RESIDUE_COL],
+                  var_name=_ION_COL,
+                  value_name=_MZ_THEORY)
+  return peaks
+
+
+def _range_normalize(vector, lower=None, upper=None):
+  """Normalizes values to a range (eg [0, 1]).
+
+  Used to range normalize a subset of a larger set of data (where the total
+  range exceeds the [min, max] of the values in vector).
+
+  Note that this can return values outside of [0, 1] if lower or upper are
+  within the range of vector. This throws no error as it can be useful in some
+  cases.
+
+  Args:
+    vector: Numpy array-like with values to normalize.
+    lower: The minimum value in the complete dataset. None to use vector.min()
+    upper: The maximum value in the complete dataset. None to use vector.max()
+
+  Returns:
+    An object of type vector with values correspondingly normalized.
+  """
+
+  if lower is None:
+    lower = vector.min()
+  if upper is None:
+    upper = vector.max()
+
+  return (vector - lower) / (upper - lower)
+
+
+def _calculate_b_series(peptide, molecular_weights):
+  """Calculates theoretical MS2 B-ion series for charge 1 fragments.
+
+  For a peptide ACDEF the B-ion series would be: A, AC, ACD, ACDE, and ACDEF
+
+  Args:
+    peptide: A list of amino-acid resides (use 1-letter AA code, as defined
+              in molecular_weights input).
+    molecular_weights: A Pandas series with weights of residues and neutral
+                       groups.
+
+  Returns:
+    A python list of M/Z values representing the B-ion series.
+  """
+  b_series = np.cumsum(
+      ([molecular_weights[_GROUP_HP]] +  # Add H to N-terminus.
+       [molecular_weights[i] for i in peptide]))
+  return b_series[1:]  # Remove the H peak.
+
+
+def _calculate_y_series(peptide, molecular_weights):
+  """Calculates theoretical MS2 Y-ion series for charge 1 fragments.
+
+  For a peptide ACDEF the Y-ion series would be: A, AC, ACD, ACDE, and ACDEF, so
+  similar as in B-series, but with an additional H3O+ ion, and reversed order.
+
+  Args:
+    peptide: A list of amino-acid resides (use 1-letter AA code, as defined
+              in molecular_weights input).
+    molecular_weights: A Pandas series with weights of residues and neutral
+                       groups.
+
+  Returns:
+    A python list of M/Z values representing the B-ion series.
+  """
+  y_series = np.cumsum(
+      ([molecular_weights[_GROUP_OH] +  # Add OH group to C-terminus.
+        molecular_weights[_GROUP_H]  + molecular_weights[_GROUP_HP]] +
+       [molecular_weights[i] for i in reversed(peptide)]))
+  return np.flipud(y_series[1:])  # Remove the H peak and turn around.
+

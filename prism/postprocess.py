@@ -16,7 +16,7 @@
 
 r"""Infers YB spectra and outputs TSV spectral library.
 
-This script post-processes DeepMass:Prism outputs. It requires two outputs:
+This script post-processes DeepMass:Prism outputs. It requires two inputs:
 output table from the preprocess.py run, and json files from the Cloud ML
 inference.
 
@@ -44,6 +44,9 @@ import pandas as pd
 from tensorflow import app
 from tensorflow import flags
 from tensorflow import gfile
+
+
+import utils
 
 
 _FLOAT_META_SUFFIX = '_pos'
@@ -91,6 +94,17 @@ flags.DEFINE_bool(
     'batch_prediction',
     True,
     'True if batch prediction instead of online was used to generate outputs.')
+flags.DEFINE_string(
+    'add_input_data_pattern',
+    None,
+    ('Input data filename pattern for additional features to-be included to '
+     'the final outptu. These inputs should be formatted in the same way as'
+     'the model outputs - ie, JSON format with "key" and "output" values,'
+     'where the key is an integer and output is a list of feature values.'))
+flags.DEFINE_list(
+    'add_feature_names',
+    None,
+    'A comma-separated list of additional feature names.')
 
 
 def reformat_outputs(row, label_dim, neutral_losses):
@@ -138,22 +152,39 @@ def reformat_outputs(row, label_dim, neutral_losses):
     pred_labels[_LOSS_TYPE] = 'noloss'
     pred_labels[_ION_COL] = pred_labels[_ION_COL]
 
+  # Add fragment m/z values. Note, only charge +1 are considered for now.
+  pred_labels = pred_labels.merge(
+      utils.calculate_yb_series(row[_MOD_SEQUENCE], utils.MOL_WEIGHTS),
+      how='left',
+      on=[_ION_COL, _POSITION_COL])
+
   ions = (pred_labels[_ION_COL] + pred_labels[_POSITION_COL].map(str) +
           '_charge' + pred_labels[_FRAG_CHARGE].map(str) + '-' +
           pred_labels[_LOSS_TYPE])
+
+  precursor_mz = (
+      (pred_labels['FragmentMz'].max() + ((row[_CHARGE]) - 1)
+       * utils.MOL_WEIGHTS['groupH+'])
+      / row[_CHARGE])
+
   ions = ';'.join(ions.values)
   intensities = ';'.join(map(str, pred_labels[_ABUNDANCE_COL]))
+  fragment_mzs = ';'.join(map(str, pred_labels['FragmentMz']))
   row = row.append(
-      pd.Series({'FragmentIons': ions, 'FragmentIntensities': intensities}))
+      pd.Series({'FragmentIons': ions,
+                 'FragmentIntensities': intensities,
+                 'FragmentMZs': fragment_mzs,
+                 'PrecursorMZ': precursor_mz}))
   row = row.drop(
-      ['key', 'outputs', 'Unnamed: 0', 'index'] + _PRECURSOR_METADATA_FEATURES)
+      ['outputs', 'Unnamed: 0', 'index'] + _PRECURSOR_METADATA_FEATURES)
   return row
 
 
 def main(unused_argv):
 
-  metadata = pd.read_csv(FLAGS.metadata_file, sep='\t')
+  metadata = pd.read_csv(gfile.Open(FLAGS.metadata_file), sep='\t')
 
+  # Read DeepMass:Prism outputs and merge with metadata.
   outputs = []
   for filen in gfile.Glob(FLAGS.input_data_pattern):
     with gfile.Open(filen) as infile:
@@ -170,6 +201,26 @@ def main(unused_argv):
       reformat_outputs,
       args=(int(FLAGS.label_dim), FLAGS.neutral_losses),
       axis=1)
+
+  # Read additional features.
+  if FLAGS.add_feature_names is not None:
+    outputs_drip = []
+    for filen in gfile.Glob(FLAGS.add_input_data_pattern):
+      with gfile.Open(filen) as infile:
+        if FLAGS.batch_prediction:
+          out_df = pd.read_json(infile, lines=True)
+          out_df = pd.DataFrame(
+              out_df['outputs'].tolist(),
+              columns=FLAGS.add_feature_names,
+              index=out_df['key'])
+        else:
+          pass  
+        outputs_drip.append(out_df)
+    outputs_drip = pd.concat(outputs_drip)
+    outputs = outputs.merge(
+        outputs_drip, how='left', left_on='key', right_index=True)
+
+  # Write to a file.
   with gfile.Open(
       os.path.join(FLAGS.output_data_dir, 'outputs.tsv'), 'w') as outf:
     outputs.to_csv(outf, sep='\t', index=False)
