@@ -100,9 +100,9 @@ def clean_peptides(peptide_list):
     for residue in re.finditer(_RE_AA, peptide):
       residue = residue.group()
       if '[' in residue:
-        if residue == 'C[Carbamidomethyl]':
+        if residue in ['C[Carbamidomethyl]', 'C[+57]']:
           residue = 'C'
-        elif residue == 'M[Oxidation]':
+        elif residue in ['M[Oxidation]', 'M[+16]']:
           residue = 'M(ox)'
         else:
           residue = residue[0]
