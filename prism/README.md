@@ -75,8 +75,16 @@ python preprocess.py \
 ```
 
 The preprocessing step will write two files into the `"${DATA_DIR}"` folder:
-input.json and metadata.csv. The first one should be uploaded to a Google Cloud
+input.json and metadata.tsv. The first one should be uploaded to a Google Cloud
 Storage bucket, and the latter one will be used in the post-processing step.
+
+In case your input sequences contain modifications in `[modification]` format
+instead of the expected `(modification)`, add the following parameter to the
+command above:
+
+```
+  --clean_peptides=True
+```
 
 ## Submit prediction job to CMLE
 
@@ -203,7 +211,7 @@ follows:
 
 ```
 python postprocess.py \
-    --metadata_file="${DATA_DIR}/metadata.csv" \
+    --metadata_file="${DATA_DIR}/metadata.tsv" \
     --input_data_pattern="${DATA_DIR}/prediction.results*" \
     --output_data_dir="${DATA_DIR}" \
     --batch_prediction=False

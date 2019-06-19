@@ -113,7 +113,7 @@ flags.DEFINE_string(
     'Input data filepath.')
 flags.DEFINE_bool(
     'clean_peptides',
-    True,
+    False,
     'True if peptide modifications are in [x] format.')
 flags.DEFINE_string(
     'sequence_col',
@@ -260,10 +260,10 @@ def main(unused_argv):
                FLAGS.analyzer_col: _MASS_ANALYZER},
       inplace=True)
 
-  check_inputs(input_data, alphabet)
-
   metadata, _ = preprocess_peptides(input_data, FLAGS.clean_peptides)
   metadata = metadata.reset_index()
+
+  check_inputs(metadata, alphabet)
 
   
   # length.
@@ -273,7 +273,7 @@ def main(unused_argv):
     for json_input in json_inputs:
       outf.write(json.dumps(json_input) + '\n')
   with gfile.Open(
-      os.path.join(FLAGS.output_data_dir, 'metadata.csv'), 'w') as outf:
+      os.path.join(FLAGS.output_data_dir, 'metadata.tsv'), 'w') as outf:
     metadata.to_csv(outf, sep='\t')
 
 
