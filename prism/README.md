@@ -102,10 +102,11 @@ limited to 1.5 Mb, which corresponds to ~300 peptides - support for batch
 predictions with unlimited input sizes is coming up soon):
 
 ```
-gcloud ml-engine predict \
+gcloud ai-platform predict \
     --model deepmass_prism \
     --project deepmass-204419 \
     --format json \
+    --region global \
     --json-instances "${DATA_DIR}/input.json" > "${DATA_DIR}/prediction.results"
 ```
 
@@ -182,13 +183,12 @@ Now you're ready to submit a CMLE batch job as follows:
 CLOUD_DIR="gs://path-to-gcs-bucket"  # Modify.
 INPUTS="${CLOUD_DIR}/input.json"  # Modify.
 JOB_NAME="prediction_job_name"  # Modify.
-REGION="us-central1"  # Modify.
 
-gcloud ml-engine jobs submit prediction "${JOB_NAME}" \
+gcloud ai-platform jobs submit prediction "${JOB_NAME}" \
     --model deepmass_prism \
     --input-paths "${INPUTS}" \
     --output-path "${CLOUD_DIR}" \
-    --region "${REGION}" \
+    --region global \
     --data-format text \
     --project deepmass-204419
 ```
